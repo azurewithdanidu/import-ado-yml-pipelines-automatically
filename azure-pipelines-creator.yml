@@ -1,0 +1,142 @@
+trigger: none  # Manually triggered only
+pr: none       # No PR triggers
+
+parameters:
+  - name: gitFolderPath
+    displayName: 'Git Folder Path (where YAML files are stored)'
+    type: string
+    default: 'pipelines'
+
+  - name: subfolderStructure
+    displayName: 'Subfolder Structure to Scan (e.g., ci,cd or * for all)'
+    type: string
+    default: '*'
+
+  - name: azureDevOpsFolderPath
+    displayName: 'Azure DevOps Root Folder Path for Created Pipelines'
+    type: string
+    default: '\\'
+
+  - name: dryRun
+    displayName: 'Dry Run (Preview without creating)'
+    type: boolean
+    default: false
+
+pool:
+  vmImage: 'windows-latest'  # Using Windows for better PowerShell support
+
+stages:
+  - stage: CreatePipelines
+    displayName: 'Create Azure DevOps Pipelines'
+    jobs:
+      - job: ScanAndCreatePipelines
+        displayName: 'Scan and Create Pipelines'
+        steps:
+          - checkout: self
+            displayName: 'Checkout Repository'
+            fetchDepth: 1
+
+          - task: PowerShell@2
+            displayName: 'Create Azure DevOps Pipelines from YAML Files'
+            env:
+              AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+            inputs:
+              targetType: 'inline'
+              pwsh: true
+              script: |
+                $ErrorActionPreference = 'Stop'
+                
+                # Parameters
+                $gitFolderPath = '${{ parameters.gitFolderPath }}'
+                $subfolderStructure = '${{ parameters.subfolderStructure }}'
+                $repositoryUrl = "$(Build.Repository.Uri)"
+                $targetBranch = "$(Build.SourceBranchName)"
+                $azureDevOpsFolderPath = '${{ parameters.azureDevOpsFolderPath }}'
+                $organizationUrl = "$(System.CollectionUri)"
+                $projectName = "$(System.TeamProject)"
+                $dryRun = [System.Convert]::ToBoolean('${{ parameters.dryRun }}')
+                $workspacePath = "$(Build.SourcesDirectory)"
+                
+                Write-Host "Repository: $repositoryUrl | Branch: $targetBranch" -ForegroundColor Cyan
+                
+                # Configure Azure DevOps CLI
+                az devops configure --defaults organization="$organizationUrl" project="$projectName" --use-git-aliases true
+                
+                # Get YAML files
+                $searchPath = Join-Path $workspacePath $gitFolderPath
+                $excludePatterns = @('*archive*', '*template*')
+                $yamlFiles = Get-ChildItem -Path $searchPath -Include *.yml,*.yaml -Recurse -File | 
+                    Where-Object { $path = $_.FullName; -not ($excludePatterns | Where-Object { $path -like $_ }) }
+                
+                if ($subfolderStructure -ne '*') {
+                    $allowedFolders = $subfolderStructure -split ',' | ForEach-Object { $_.Trim() }
+                    $yamlFiles = $yamlFiles | Where-Object { 
+                        $rel = $_.FullName.Substring($searchPath.Length + 1)
+                        $first = ($rel -split '\\')[0]
+                        $allowedFolders -contains $first
+                    }
+                }
+                
+                Write-Host "Found $($yamlFiles.Count) YAML file(s)" -ForegroundColor Green
+                
+                # Get existing pipelines
+                $existing = @{}
+                $pipelines = az pipelines list --output json | ConvertFrom-Json
+                $pipelines | ForEach-Object { $existing["$($_.path)/$($_.name)".ToLower()] = $_ }
+                
+                # Get queue ID
+                $queueId = 0
+                try {
+                    $queues = az pipelines queue list --output json 2>$null | ConvertFrom-Json
+                    $queue = $queues | Where-Object { $_.name -eq 'Azure Pipelines' } | Select-Object -First 1
+                    if ($queue) { $queueId = $queue.id }
+                } catch { }
+                
+                $stats = @{ Created = 0; Skipped = 0; Failed = 0 }
+                
+                foreach ($file in $yamlFiles) {
+                    $relativePath = $file.FullName.Substring($searchPath.Length + 1)
+                    $folder = Split-Path $relativePath -Parent
+                    $targetFolder = if ($folder) { "\$($folder -replace '\\','\')" } else { $azureDevOpsFolderPath }
+                    $name = [IO.Path]::GetFileNameWithoutExtension($file.Name)
+                    $yamlPath = $file.FullName.Substring($workspacePath.Length + 1) -replace '\\','/'
+                    $key = "$targetFolder\$name".ToLower()
+                    
+                    if ($existing.ContainsKey($key)) {
+                        Write-Host "SKIP: $name (exists)" -ForegroundColor Yellow
+                        $stats.Skipped++
+                        continue
+                    }
+                    
+                    if ($dryRun) {
+                        Write-Host "DRY-RUN: Would create $name" -ForegroundColor Cyan
+                        $stats.Created++
+                        continue
+                    }
+                    
+                    $args = @('pipelines','create','--name',$name,'--repository',$repositoryUrl,
+                              '--branch',$targetBranch,'--yaml-path',$yamlPath,'--skip-run')
+                    if ($queueId -gt 0) { $args += '--queue-id'; $args += $queueId }
+                    if ($targetFolder -ne '\') { $args += '--folder-path'; $args += $targetFolder }
+                    
+                    $result = & az $args 2>&1
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "CREATED: $name" -ForegroundColor Green
+                        $stats.Created++
+                    } else {
+                        $err = $result -join "`n"
+                        if ($err -like "*Access denied*") {
+                            Write-Host "##vso[task.logissue type=error]PERMISSION ERROR: Grant 'Create build pipeline' to Build Service at Project Settings > Pipelines > Security"
+                        }
+                        Write-Host "FAILED: $name - $err" -ForegroundColor Red
+                        $stats.Failed++
+                    }
+                }
+                
+                Write-Host "`n=== SUMMARY ===" -ForegroundColor Cyan
+                Write-Host "Created: $($stats.Created) | Skipped: $($stats.Skipped) | Failed: $($stats.Failed)"
+                
+                if ($stats.Failed -gt 0) { throw "Failed to create $($stats.Failed) pipeline(s)" }
+              failOnStderr: false
+              showWarnings: true
+              workingDirectory: '$(Build.SourcesDirectory)'

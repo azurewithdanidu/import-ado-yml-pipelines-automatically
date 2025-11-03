@@ -1,0 +1,84 @@
+trigger: none  # Manually triggered only
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: prod-environment-variables
+  - name: environmentName
+    value: 'Production'
+  - name: azureSubscription
+    value: 'Azure-Prod-ServiceConnection'
+
+stages:
+  - stage: DeployProd
+    displayName: 'Deploy to Production'
+    jobs:
+      - deployment: DeployJob
+        displayName: 'Deploy Application'
+        environment: 'prod'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadBuildArtifacts@1
+                  displayName: 'Download Build Artifacts'
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'frontend-build'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+
+                - task: AzureAppServiceManage@0
+                  displayName: 'Start Deployment Slot'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    action: 'Start Azure App Service'
+                    webAppName: 'myapp-prod'
+                    specifySlotOrASE: true
+                    resourceGroupName: 'myapp-rg'
+                    slot: 'staging'
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Staging Slot'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webApp'
+                    appName: 'myapp-prod'
+                    package: '$(System.ArtifactsDirectory)/frontend-build'
+                    deploymentMethod: 'auto'
+                    slotName: 'staging'
+
+                - task: PowerShell@2
+                  displayName: 'Validate Staging Deployment'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      Write-Host "Validating staging deployment..."
+                      $response = Invoke-WebRequest -Uri "https://myapp-prod-staging.azurewebsites.net/health" -UseBasicParsing
+                      if ($response.StatusCode -ne 200) {
+                        throw "Validation failed with status code: $($response.StatusCode)"
+                      }
+                      Write-Host "Validation successful!"
+
+                - task: AzureAppServiceManage@0
+                  displayName: 'Swap to Production'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    action: 'Swap Slots'
+                    webAppName: 'myapp-prod'
+                    resourceGroupName: 'myapp-rg'
+                    sourceSlot: 'staging'
+                    swapWithProduction: true
+
+                - task: PowerShell@2
+                  displayName: 'Verify Production Deployment'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      Write-Host "Verifying production deployment..."
+                      $response = Invoke-WebRequest -Uri "https://myapp-prod.azurewebsites.net/health" -UseBasicParsing
+                      if ($response.StatusCode -ne 200) {
+                        throw "Production verification failed!"
+                      }
+                      Write-Host "Production deployment verified successfully!"

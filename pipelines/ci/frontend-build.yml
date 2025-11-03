@@ -1,0 +1,66 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - src/frontend/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  nodeVersion: '20.x'
+
+stages:
+  - stage: Build
+    displayName: 'Build Frontend Application'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build and Test'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Install Node.js'
+            inputs:
+              versionSpec: '$(nodeVersion)'
+
+          - task: Npm@1
+            displayName: 'npm install'
+            inputs:
+              command: 'install'
+              workingDir: 'src/frontend'
+
+          - task: Npm@1
+            displayName: 'npm run lint'
+            inputs:
+              command: 'custom'
+              customCommand: 'run lint'
+              workingDir: 'src/frontend'
+
+          - task: Npm@1
+            displayName: 'npm run test'
+            inputs:
+              command: 'custom'
+              customCommand: 'run test -- --coverage'
+              workingDir: 'src/frontend'
+
+          - task: Npm@1
+            displayName: 'npm run build'
+            inputs:
+              command: 'custom'
+              customCommand: 'run build'
+              workingDir: 'src/frontend'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish Test Results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'src/frontend/test-results/*.xml'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish Build Artifacts'
+            inputs:
+              PathtoPublish: 'src/frontend/dist'
+              ArtifactName: 'frontend-build'
+              publishLocation: 'Container'

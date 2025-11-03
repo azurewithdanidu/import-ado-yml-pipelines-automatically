@@ -1,0 +1,54 @@
+# Azure DevOps Pipeline Creator - Git Ignore File
+
+# Logs
+*.log
+logs/
+
+# Environment files (never commit secrets)
+.env
+.env.local
+.env.*.local
+*.secret
+secrets/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build outputs (if you add build scripts)
+dist/
+build/
+out/
+
+# Node modules (if you add Node.js tooling)
+node_modules/
+
+# PowerShell temporary files
+*.ps1xml
+
+# Test results
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# Azure DevOps local config (if testing locally)
+.azure/
+.azuredevops/
+
+# Bicep compiled files (if you add infrastructure)
+*.bicep.json
+*.bicep.parameters.json
+
+# Backup files
+*.bak
+*.backup

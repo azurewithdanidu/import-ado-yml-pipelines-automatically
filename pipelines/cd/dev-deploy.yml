@@ -1,0 +1,52 @@
+trigger: none  # Manually triggered or triggered by build completion
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - group: dev-environment-variables
+  - name: environmentName
+    value: 'Development'
+  - name: azureSubscription
+    value: 'Azure-Dev-ServiceConnection'
+
+stages:
+  - stage: DeployDev
+    displayName: 'Deploy to Development'
+    jobs:
+      - deployment: DeployJob
+        displayName: 'Deploy Application'
+        environment: 'dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadBuildArtifacts@1
+                  displayName: 'Download Build Artifacts'
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: 'frontend-build'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure App Service'
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appType: 'webApp'
+                    appName: 'myapp-dev'
+                    package: '$(System.ArtifactsDirectory)/frontend-build'
+                    deploymentMethod: 'auto'
+
+                - task: PowerShell@2
+                  displayName: 'Run Smoke Tests'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      Write-Host "Running smoke tests against dev environment..."
+                      $response = Invoke-WebRequest -Uri "https://myapp-dev.azurewebsites.net/health" -UseBasicParsing
+                      if ($response.StatusCode -eq 200) {
+                        Write-Host "Smoke test passed!"
+                      } else {
+                        throw "Smoke test failed with status code: $($response.StatusCode)"
+                      }
