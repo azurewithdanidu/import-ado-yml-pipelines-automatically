@@ -47,7 +47,7 @@ This self-contained Azure Pipeline automatically discovers and creates Azure Dev
 
 1. Click **Run pipeline**
 2. Configure parameters:
-   - **gitFolderPath**: `pipelines` (folder containing your YAML files)
+   - **gitFolderPath**: `pipelines` (folder containing sample YAML files) in this case for this exmple you can have your own fodler
    - **subfolderStructure**: `*` (scan all) or `ci,cd` (specific folders)
    - **azureDevOpsFolderPath**: `\\` (root) or `\\MyPipelines` (custom folder)
    - **dryRun**: `true` (preview) or `false` (create)
