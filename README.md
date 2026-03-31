@@ -1,4 +1,4 @@
-# Azure DevOps Pipeline Creator
+# Import Azure Devops Pipeline Automatically
 
 Automated solution for creating multiple Azure DevOps pipelines from YAML files in your repository with a single click.
 
