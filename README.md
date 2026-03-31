@@ -1,203 +1,403 @@
-# Import Azure Devops Pipeline Automatically
+# Import Azure DevOps Pipelines Automatically
 
-Automated solution for creating multiple Azure DevOps pipelines from YAML files in your repository with a single click.
+A self-contained Azure Pipeline that discovers YAML files in your repository and creates Azure DevOps pipeline definitions for each one -- no manual clicking required.
 
 ## Overview
 
-This self-contained Azure Pipeline automatically discovers and creates Azure DevOps pipelines from YAML files in your repository. It's **fully self-contained** - no external parameters for organization, project, repository, or branch needed. Everything is derived from the running pipeline's context.
+Managing dozens (or hundreds) of pipeline YAML files by hand is tedious. This project provides a single "creator" pipeline (`azure-pipelines-creator.yml`) that you run once. It scans a folder in your repo, finds every `.yml` / `.yaml` file, and registers a corresponding pipeline in Azure DevOps while preserving the folder hierarchy.
 
-## ✨ Key Features
+Everything is **self-contained** -- the pipeline reads its organisation, project, repo, and branch from built-in Azure DevOps variables, so there's nothing extra to configure.
 
-- 🚀 **Self-Contained**: Uses built-in Azure DevOps variables - no org/project/repo/branch parameters needed
-- 🔍 **Smart Discovery**: Automatically finds YAML files and excludes archive/template folders
-- 🛡️ **Duplicate Protection**: Checks for existing pipelines before creation
-- 📁 **Hierarchy Preservation**: Maintains folder structure from repository to Azure DevOps
-- 🎯 **Queue Auto-Detection**: Automatically finds and uses the correct agent pool
-- 🔐 **Permission Guidance**: Detailed error messages with step-by-step fix instructions
-- 🧪 **Dry Run Mode**: Preview changes before creating anything
-- ⚡ **Optimized**: Compact 138-line pipeline (~6,700 characters)
-- 📊 **Summary Reports**: Clear statistics of created/skipped/failed pipelines
+## Key Features
+
+- **Self-Contained** -- derives org/project/repo/branch from the running pipeline context
+- **Smart Discovery** -- recursively finds `.yml` and `.yaml` files, automatically excluding `archive` and `template` folders
+- **Duplicate Protection** -- checks for existing pipelines before creation; re-running is always safe
+- **Folder Hierarchy** -- mirrors sub-folder structure (e.g. `pipelines/ci/` -> `\ci\` in Azure DevOps)
+- **Queue Auto-Detection** -- locates the "Azure Pipelines" hosted pool automatically
+- **Dry-Run Mode** -- preview what would be created without touching anything
+- **Permission Guidance** -- surfaces specific fix instructions when the Build Service lacks permissions
+- **Summary Report** -- prints created / skipped / failed counts at the end
+
+## Repository Structure
+
+```
+import-ado-yml-pipelines-automatically/
+  azure-pipelines-creator.yml        # The creator pipeline
+  QUICKSTART.md
+  README.md
+  pipelines/
+    ci/
+      backend-build.yml               # .NET 8 build + test
+      frontend-build.yml              # Node 20 build + lint + test
+    cd/
+      dev-deploy.yml                  # Deploy to Dev (App Service)
+      prod-deploy.yml                 # Deploy to Prod (slot swap)
+    infrastructure/
+      provision.yml                   # Bicep validate + deploy
+```
+
+The `pipelines/` folder ships with sample YAML files covering CI, CD, and infrastructure provisioning.
+Replace or extend them with your own pipelines -- the creator will pick them up automatically.
 
 ## Prerequisites
 
-1. **Azure DevOps Project** with admin or Build Administrator permissions
-2. **Repository** containing this pipeline YAML file
-3. **Permissions** - the Build Service account needs "Create build pipeline" permission (see Setup below)
+1. An **Azure DevOps project** where you have Build Administrator (or equivalent) permissions.
+2. The repository must contain `azure-pipelines-creator.yml` and at least one pipeline YAML file under the scan folder.
+3. The **Build Service** account must have the **"Create build pipeline"** permission (see Setup below).
 
-## 🚀 Quick Setup (3 Steps)
+## Quick Setup
 
-### Step 1: Grant Build Service Permissions
+### 1 -- Grant Build Service Permissions
 
-1. Go to **Project Settings** > **Pipelines** (left sidebar)
-2. Click **⋮** (three dots) next to any folder or at the root level
-3. Click **Security**
-4. Add: **[YourProject] Build Service ([YourOrg])**
-5. Set **"Create build pipeline"** permission to **Allow**
-6. ✅ Done! This applies to all subfolders
+1. Go to **Project Settings > Pipelines** in the left sidebar.
+2. Click the three-dot menu (**...**) next to any folder (or at root) and select **Security**.
+3. Add **[YourProject] Build Service ([YourOrg])**.
+4. Set **"Create build pipeline"** to **Allow**.
 
-### Step 2: Create the Pipeline
+Granting this at the root `\` folder propagates to all sub-folders.
 
-1. In Azure DevOps, go to **Pipelines** > **New Pipeline**
-2. Select your repository
-3. Choose **Existing Azure Pipelines YAML file**
-4. Select `azure-pipelines-creator.yml`
-5. Click **Save** (or **Run** to execute immediately)
+### 2 -- Create the Creator Pipeline
 
-### Step 3: Run the Pipeline
+1. Navigate to **Pipelines > New Pipeline**.
+2. Select your repository.
+3. Choose **Existing Azure Pipelines YAML file**.
+4. Pick `azure-pipelines-creator.yml`.
+5. Click **Save** (or **Run** to execute straight away).
 
-1. Click **Run pipeline**
-2. Configure parameters:
-   - **gitFolderPath**: `pipelines` (folder containing sample YAML files) in this case for this exmple you can have your own fodler
-   - **subfolderStructure**: `*` (scan all) or `ci,cd` (specific folders)
-   - **azureDevOpsFolderPath**: `\\` (root) or `\\MyPipelines` (custom folder)
-   - **dryRun**: `true` (preview) or `false` (create)
-3. Click **Run**
-4. Check the logs for summary!
+### 3 -- Run the Pipeline
 
-## 📋 Pipeline Parameters
+1. Click **Run pipeline**.
+2. Fill in the parameters (see table below).
+3. Click **Run** and check the logs for the summary.
+
+## Parameters
+
+The creator pipeline exposes four parameters:
 
 | Parameter | Description | Default | Example |
-|-----------|-------------|---------|---------|
-| **gitFolderPath** | Folder containing pipeline YAML files (relative to repo root) | `pipelines` | `devops/pipelines` |
-| **subfolderStructure** | Comma-separated subfolders to scan, or `*` for all | `*` | `ci,cd` |
-| **azureDevOpsFolderPath** | Target folder in Azure DevOps for created pipelines | `\\` | `\\Automated` |
-| **dryRun** | Preview mode - shows what would be created without creating | `false` | `true` |
+|---|---|---|---|
+| `gitFolderPath` | Folder containing your pipeline YAML files (relative to repo root) | `pipelines` | `devops/pipelines` |
+| `subfolderStructure` | Comma-separated sub-folder names to scan, or `*` for all | `*` | `ci,cd` |
+| `azureDevOpsFolderPath` | Target folder in Azure DevOps where pipelines are created | `\\` | `\\Automated` |
+| `dryRun` | When `true`, logs what would happen without creating anything | `false` | `true` |
 
-### 🔍 What Gets Excluded Automatically
+These are declared at the top of `azure-pipelines-creator.yml`:
 
-The pipeline automatically excludes:
-- Folders containing **"archive"** (e.g., `archive/`, `old-archive/`, `archive-2024/`)
-- Folders containing **"template"** (e.g., `templates/`, `my-templates/`, `template-backup/`)
-- Case-insensitive matching
+```yaml
+parameters:
+  - name: gitFolderPath
+    displayName: 'Git Folder Path (where YAML files are stored)'
+    type: string
+    default: 'pipelines'
 
-## 📂 Folder Structure Example
+  - name: subfolderStructure
+    displayName: 'Subfolder Structure to Scan (e.g., ci,cd or * for all)'
+    type: string
+    default: '*'
 
-### Your Repository
-```
-your-repo/
-├── azure-pipelines-creator.yml  ← This pipeline
-└── pipelines/
-    ├── ci/
-    │   ├── backend-build.yml
-    │   └── frontend-build.yml
-    ├── cd/
-    │   ├── dev-deploy.yml
-    │   └── prod-deploy.yml
-    ├── archive/                ← EXCLUDED
-    │   └── old-pipeline.yml
-    └── templates/              ← EXCLUDED
-        └── base-template.yml
-```
+  - name: azureDevOpsFolderPath
+    displayName: 'Azure DevOps Root Folder Path for Created Pipelines'
+    type: string
+    default: '\\'
 
-### Result in Azure DevOps (with `azureDevOpsFolderPath: \\`)
-```
-\ci\
-  ├── backend-build
-  └── frontend-build
-\cd\
-  ├── dev-deploy
-  └── prod-deploy
+  - name: dryRun
+    displayName: 'Dry Run (Preview without creating)'
+    type: boolean
+    default: false
 ```
 
-## 🔧 How It Works
+### Automatic Exclusions
 
-1. **Initialization**: Sets up variables from built-in pipeline context
-   - Repository: `$(Build.Repository.Uri)`
-   - Branch: `$(Build.SourceBranchName)`
-   - Organization: `$(System.CollectionUri)`
-   - Project: `$(System.TeamProject)`
+Any folder whose path contains **"archive"** or **"template"** (case-insensitive) is skipped. This is controlled by the following snippet inside the inline PowerShell script:
 
-2. **Azure CLI Setup**: Configures CLI defaults with organization and project
+```powershell
+$excludePatterns = @('*archive*', '*template*')
+$yamlFiles = Get-ChildItem -Path $searchPath -Include *.yml,*.yaml -Recurse -File |
+    Where-Object { $path = $_.FullName; -not ($excludePatterns | Where-Object { $path -like $_ }) }
+```
 
-3. **YAML Discovery**: Scans for `.yml` and `.yaml` files
-   - Applies subfolder filtering if specified
-   - Excludes folders containing "archive" or "template"
+## How It Works
 
-4. **Duplicate Detection**: Retrieves existing pipelines and creates lookup map
+The pipeline runs a single PowerShell task with the following steps:
 
-5. **Queue Detection**: Automatically finds "Azure Pipelines" queue or first available queue
+### 1. Initialise variables from the pipeline context
 
-6. **Pipeline Creation**: For each YAML file:
-   - Calculates target folder (preserves hierarchy)
-   - Checks if pipeline exists
-   - Creates pipeline with `az pipelines create`
-   - Handles permission errors with detailed instructions
+```powershell
+$repositoryUrl      = "$(Build.Repository.Uri)"
+$targetBranch       = "$(Build.SourceBranchName)"
+$organizationUrl    = "$(System.CollectionUri)"
+$projectName        = "$(System.TeamProject)"
+```
 
-7. **Summary**: Reports created/skipped/failed counts
+### 2. Configure the Azure DevOps CLI
 
-## 📊 Sample Output
+```powershell
+az devops configure --defaults organization="$organizationUrl" project="$projectName" --use-git-aliases true
+```
+
+### 3. Discover YAML files
+
+The script calls `Get-ChildItem` to find all `.yml` / `.yaml` files under the scan folder, filters out excluded patterns, and optionally restricts to specific sub-folders:
+
+```powershell
+if ($subfolderStructure -ne '*') {
+    $allowedFolders = $subfolderStructure -split ',' | ForEach-Object { $_.Trim() }
+    $yamlFiles = $yamlFiles | Where-Object {
+        $rel = $_.FullName.Substring($searchPath.Length + 1)
+        $first = ($rel -split '\\')[0]
+        $allowedFolders -contains $first
+    }
+}
+```
+
+### 4. Build a lookup of existing pipelines
+
+```powershell
+$existing = @{}
+$pipelines = az pipelines list --output json | ConvertFrom-Json
+$pipelines | ForEach-Object { $existing["$($_.path)/$($_.name)".ToLower()] = $_ }
+```
+
+### 5. Detect the hosted queue
+
+```powershell
+$queues = az pipelines queue list --output json 2>$null | ConvertFrom-Json
+$queue  = $queues | Where-Object { $_.name -eq 'Azure Pipelines' } | Select-Object -First 1
+if ($queue) { $queueId = $queue.id }
+```
+
+### 6. Create each pipeline (or log dry-run)
+
+For every discovered YAML file the script calculates the target folder, checks the lookup map, and either skips (duplicate), logs (dry-run), or creates:
+
+```powershell
+$args = @('pipelines','create','--name',$name,'--repository',$repositoryUrl,
+          '--branch',$targetBranch,'--yaml-path',$yamlPath,'--skip-run')
+if ($queueId -gt 0)       { $args += '--queue-id';    $args += $queueId }
+if ($targetFolder -ne '\') { $args += '--folder-path'; $args += $targetFolder }
+
+$result = & az $args 2>&1
+```
+
+### 7. Print summary
+
+```
+=== SUMMARY ===
+Created: 3 | Skipped: 1 | Failed: 0
+```
+
+## Folder Mapping Example
+
+Given the repository structure shipped in this repo and a run with `gitFolderPath = pipelines`, `subfolderStructure = *`, and `azureDevOpsFolderPath = \\`:
+
+| Repository Path | Azure DevOps Pipeline (name / folder) |
+|---|---|
+| `pipelines/ci/backend-build.yml` | `backend-build` in `\ci` |
+| `pipelines/ci/frontend-build.yml` | `frontend-build` in `\ci` |
+| `pipelines/cd/dev-deploy.yml` | `dev-deploy` in `\cd` |
+| `pipelines/cd/prod-deploy.yml` | `prod-deploy` in `\cd` |
+| `pipelines/infrastructure/provision.yml` | `provision` in `\infrastructure` |
+
+## Sample Pipeline Files
+
+The `pipelines/` folder includes working examples you can use as starting points.
+
+### CI -- .NET Backend Build (`pipelines/ci/backend-build.yml`)
+
+Builds a .NET 8 solution, runs unit tests with code coverage, and publishes results:
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - src/backend/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              version: '8.x'
+          - task: DotNetCoreCLI@2
+            inputs:
+              command: 'build'
+              projects: 'src/backend/**/*.csproj'
+              arguments: '--configuration Release'
+          - task: DotNetCoreCLI@2
+            inputs:
+              command: 'test'
+              projects: 'src/backend/**/*Tests.csproj'
+              arguments: '--configuration Release --collect:"XPlat Code Coverage"'
+```
+
+### CI -- Node.js Frontend Build (`pipelines/ci/frontend-build.yml`)
+
+Installs dependencies, lints, runs tests, and builds the frontend:
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - src/frontend/**
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '20.x'
+          - task: Npm@1
+            inputs:
+              command: 'install'
+              workingDir: 'src/frontend'
+          - task: Npm@1
+            inputs:
+              command: 'custom'
+              customCommand: 'run lint'
+              workingDir: 'src/frontend'
+          - task: Npm@1
+            inputs:
+              command: 'custom'
+              customCommand: 'run build'
+              workingDir: 'src/frontend'
+```
+
+### CD -- Dev Deployment (`pipelines/cd/dev-deploy.yml`)
+
+Downloads build artifacts and deploys to an Azure App Service with a smoke test:
+
+```yaml
+trigger: none   # Manually triggered
+
+stages:
+  - stage: DeployDev
+    jobs:
+      - deployment: DeployJob
+        environment: 'dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadBuildArtifacts@1
+                  inputs:
+                    artifactName: 'frontend-build'
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: '$(azureSubscription)'
+                    appName: 'myapp-dev'
+                    package: '$(System.ArtifactsDirectory)/frontend-build'
+```
+
+### Infrastructure -- Bicep Provisioning (`pipelines/infrastructure/provision.yml`)
+
+Validates and deploys Bicep templates with parameterised environment and deployment mode:
+
+```yaml
+parameters:
+  - name: environment
+    type: string
+    default: 'dev'
+    values: [dev, staging, prod]
+  - name: deploymentMode
+    type: string
+    default: 'Incremental'
+    values: [Incremental, Complete]
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - infrastructure/**
+```
+
+## Sample Output
 
 ```
 Repository: https://dev.azure.com/myorg/myproject/_git/myrepo | Branch: main
-Found 4 YAML file(s)
+Found 5 YAML file(s)
 
 SKIP: frontend-build (exists)
 CREATED: backend-build
 CREATED: dev-deploy
 CREATED: prod-deploy
+CREATED: provision
 
 === SUMMARY ===
-Created: 3 | Skipped: 1 | Failed: 0
+Created: 4 | Skipped: 1 | Failed: 0
 ```
 
-## ❗ Troubleshooting
+## Troubleshooting
 
-### Issue: "Access denied. Build Service needs Create build pipeline permissions"
+### "Access denied. Build Service needs Create build pipeline permissions"
 
-**Solution:**
-1. Go to **Project Settings** > **Pipelines**
-2. Click **Security** (you may need to click ⋮ on a folder first)
-3. Add: **[YourProject] Build Service ([YourOrg])**
-4. Grant **"Create build pipeline"** = **Allow**
-5. Tip: Grant at root `\` to apply to all folders
+1. Go to **Project Settings > Pipelines**.
+2. Open **Security** (click the three-dot menu on a folder if needed).
+3. Add **[YourProject] Build Service ([YourOrg])**.
+4. Set **"Create build pipeline"** to **Allow**.
+5. Granting at the root `\` applies to all sub-folders.
 
-### Issue: "Cannot find a hosted pool queue"
+### "Cannot find a hosted pool queue"
 
-**Solution:** This is usually auto-detected. If it fails:
-1. Pipeline will attempt creation without queue ID
-2. Azure DevOps will use default queue
-3. If issues persist, check Project Settings > Agent Pools
+The queue is normally auto-detected. If it fails, the pipeline attempts creation without a queue ID and Azure DevOps will assign the default queue. Check **Project Settings > Agent Pools** if issues persist.
 
-### Issue: "No YAML files found"
+### "No YAML files found"
 
-**Solutions:**
-- Verify `gitFolderPath` exists in your repo
-- Check files have `.yml` or `.yaml` extension
-- Files must be committed to the current branch
-- Try `subfolderStructure: *` to scan all folders
+- Confirm `gitFolderPath` matches a folder in your repo.
+- Check that files use `.yml` or `.yaml` extensions.
+- Files must be committed to the branch the pipeline runs against.
+- Try `subfolderStructure: *` to scan all sub-folders.
 
-### Issue: "Pipeline already exists" for all pipelines
+### All pipelines show "SKIP (exists)"
 
-**This is expected behavior!**
-- The pipeline won't create duplicates
-- Re-running is safe
-- To recreate: Delete existing pipelines in Azure DevOps first
+This is expected when every pipeline has already been created. The creator never creates duplicates. To recreate a pipeline, delete it from Azure DevOps first, then re-run.
 
-## 💡 Best Practices
+## Best Practices
 
-1. ✅ **Always test with `dryRun: true` first**
-2. ✅ **Keep pipeline YAML files in dedicated folder** (e.g., `pipelines/`)
-3. ✅ **Use descriptive names** (lowercase, hyphen-separated)
-4. ✅ **Grant permissions at root level** (applies to all subfolders)
-5. ✅ **Re-run after adding new YAML files** (won't duplicate existing)
-6. ✅ **Review logs** for excluded files/folders
+1. **Always dry-run first** -- set `dryRun: true` when trying a new configuration.
+2. **Keep pipeline YAML in a dedicated folder** (e.g. `pipelines/`) to keep the scan targeted.
+3. **Use descriptive, lowercase, hyphen-separated names** -- the file name becomes the pipeline name.
+4. **Grant permissions at root level** so new sub-folders are covered automatically.
+5. **Re-run after adding new YAML files** -- existing pipelines are skipped, only new ones are created.
 
-## 🎯 Use Cases
+## Use Cases
 
-### Use Case 1: Bulk Pipeline Creation
-Create 50+ pipelines from a repository with complex folder structure in one run.
+**Bulk creation** -- Register 50+ pipelines from a complex folder structure in a single run.
 
-### Use Case 2: Multi-Environment Setup
-Organize pipelines by environment:
+**Multi-environment layout** -- Organise by environment and let the creator mirror the structure:
+
 ```
 pipelines/
-├── dev/     → \Dev\*
-├── staging/ → \Staging\*
-└── prod/    → \Prod\*
+  dev/      ->  \dev\
+  staging/  ->  \staging\
+  prod/     ->  \prod\
 ```
 
-### Use Case 3: Incremental Updates
-Add new YAML files to repo, re-run pipeline - only new pipelines are created.
+**Incremental updates** -- Commit new YAML files, re-run the creator, and only the new pipelines are added.
+
+## License
+
+This project is provided as-is. See the repository for licence details.
 
 ### Use Case 4: Monorepo Management
 Manage hundreds of microservice pipelines with consistent naming and structure.
